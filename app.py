@@ -42,20 +42,14 @@ def rate_ok(ip, bucket, limit):
 def _load_model():
     import torch
     torch.set_num_threads(1)
-    from iopaint.model_manager import ModelManager
-    from iopaint.schema import Device
-    return ModelManager(name="lama", device=Device.cpu)
+    from simple_lama_inpainting import SimpleLama
+    return SimpleLama()
 
 
 def _unload_model(m):
     import gc
     del m
     gc.collect()
-    try:
-        from iopaint.helper import torch_gc
-        torch_gc()
-    except Exception:
-        pass
 
 
 @app.get("/")
@@ -84,12 +78,15 @@ async def image_dewatermark(request: Request, image: UploadFile = File(...), mas
     msk = cv2.resize(msk, (img.shape[1], img.shape[0]), interpolation=cv2.INTER_NEAREST)
     _, msk = cv2.threshold(msk, 127, 255, cv2.THRESH_BINARY)
     msk = cv2.dilate(msk, np.ones((5, 5), np.uint8), iterations=1)
-    from iopaint.schema import InpaintRequest
+    from PIL import Image
+    pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+    pil_mask = Image.fromarray(msk)
     model = _load_model()
     try:
-        result = model(img, msk, InpaintRequest())  # output is BGR, encode directly
+        result_pil = model(pil_img, pil_mask)
     finally:
         _unload_model(model)
+    result = cv2.cvtColor(np.array(result_pil), cv2.COLOR_RGB2BGR)
     ok, buf = cv2.imencode(".png", result.astype(np.uint8))
     if not ok:
         return JSONResponse({"success": False, "error": "encode_failed"}, 500)
